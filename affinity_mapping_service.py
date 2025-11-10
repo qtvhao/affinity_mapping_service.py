@@ -46,7 +46,9 @@ class AffinityMappingSession:
                 'cluster_name': str,
                 'cluster_number': int,
                 'related_concepts': str,
-                'key_relationships': str
+                'key_relationships': str,
+                'embedding': list[float] or None,
+                'assigned': list[dict]  # [{chunk_content: str, similarity_score: float, embedding: list[float]}]
             }]
         """
         if self._clusters is None:
@@ -81,7 +83,8 @@ class AffinityMappingSession:
                 'cluster_number': cluster_number,
                 'related_concepts': related_concepts,
                 'key_relationships': key_relationships,
-                'embedding': embedding
+                'embedding': embedding,
+                'assigned': []  # Initialize with empty list for assigned chunks
             })
 
         return clusters
@@ -258,8 +261,10 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
         Add a chunk to the most similar cluster in the affinity mapping session.
 
         Uses cosine similarity to find the best matching cluster based on embeddings.
-        If no cluster meets the similarity threshold, returns information indicating
-        no match was found.
+        If no cluster meets the similarity threshold, the chunk is assigned to a special
+        'Uncategorized' cluster (cluster_number=999). When a chunk is assigned to a cluster,
+        it is added to the cluster's 'assigned' list with chunk_content, similarity_score,
+        and embedding.
 
         Args:
             chunk_embedding: The embedding vector for the chunk
@@ -269,11 +274,11 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
 
         Returns:
             dict: Information about the cluster assignment with keys:
-                - 'cluster_number': int or None if no match
-                - 'cluster_name': str or None if no match
+                - 'cluster_number': int (999 for Uncategorized)
+                - 'cluster_name': str (cluster name or 'Uncategorized')
                 - 'similarity_score': float (cosine similarity)
                 - 'chunk_content': str (the input chunk content)
-                - 'assigned': bool (True if assigned to a cluster)
+                - 'assigned': bool (always True, including for Uncategorized)
         """
         import numpy as np
 
@@ -309,6 +314,13 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
 
         # Check if best similarity meets threshold
         if best_cluster is not None and best_similarity >= similarity_threshold:
+            # Add the chunk to the cluster's assigned list
+            best_cluster['assigned'].append({
+                'chunk_content': chunk_content,
+                'similarity_score': float(best_similarity),
+                'embedding': chunk_embedding
+            })
+
             return {
                 'cluster_number': best_cluster['cluster_number'],
                 'cluster_name': best_cluster['cluster_name'],
@@ -317,12 +329,37 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
                 'assigned': True
             }
         else:
+            # Chunk doesn't meet threshold - assign to 'Uncategorized' cluster (999)
+            # First, check if the 'Uncategorized' cluster already exists
+            uncategorized_cluster = None
+            for cluster in clusters:
+                if cluster['cluster_number'] == 999:
+                    uncategorized_cluster = cluster
+                    break
+
+            # If it doesn't exist, create it
+            if uncategorized_cluster is None:
+                uncategorized_cluster = {
+                    'cluster_number': 999,
+                    'cluster_name': 'Uncategorized',
+                    'embedding': None,  # No embedding for this special cluster
+                    'assigned': []
+                }
+                clusters.append(uncategorized_cluster)
+
+            # Add the chunk to the Uncategorized cluster
+            uncategorized_cluster['assigned'].append({
+                'chunk_content': chunk_content,
+                'similarity_score': float(best_similarity) if best_similarity > -1 else 0.0,
+                'embedding': chunk_embedding
+            })
+
             return {
-                'cluster_number': None,
-                'cluster_name': None,
+                'cluster_number': 999,
+                'cluster_name': 'Uncategorized',
                 'similarity_score': float(best_similarity) if best_similarity > -1 else 0.0,
                 'chunk_content': chunk_content,
-                'assigned': False
+                'assigned': True
             }
 
     def add_chunks_to_clusters(
@@ -366,6 +403,50 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
             results.append(result)
 
         return results
+
+    def process_documents_with_affinity_mapping(
+        self,
+        chunk_size: int = 1000,
+        chunk_overlap: int = 200,
+        similarity_threshold: float = 0.7
+    ) -> tuple[AffinityMappingSession, list[str], list[dict]]:
+        """
+        Complete workflow: generate affinity mapping, chunk documents, and assign chunks to clusters.
+
+        This method orchestrates the full affinity mapping process:
+        1. Generates an affinity mapping session from self.documents
+        2. Chunks all documents into smaller pieces
+        3. Assigns each chunk to the most similar cluster (or 'Uncategorized' if below threshold)
+
+        Args:
+            chunk_size: Maximum size of each chunk in characters (default: 1000)
+            chunk_overlap: Number of overlapping characters between chunks (default: 200)
+            similarity_threshold: Minimum cosine similarity to assign to a cluster (default: 0.7)
+
+        Returns:
+            tuple containing:
+                - AffinityMappingSession: The generated session with clusters
+                - list[str]: All document chunks
+                - list[dict]: Cluster assignment results for each chunk
+        """
+        # Step 1: Generate affinity mapping session
+        session = self.generate_affinity_mapping_session()
+
+        # Step 2: Chunk all documents
+        chunks = self.chunk_documents(
+            documents=self.documents,
+            chunk_size=chunk_size,
+            chunk_overlap=chunk_overlap
+        )
+
+        # Step 3: Assign chunks to clusters
+        results = self.add_chunks_to_clusters(
+            chunk_contents=chunks,
+            session=session,
+            similarity_threshold=similarity_threshold
+        )
+
+        return session, chunks, results
 
     def process_document(self, document):
         """
