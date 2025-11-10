@@ -128,3 +128,4 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+.npm-cache/
