@@ -415,8 +415,11 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
 
         This method orchestrates the full affinity mapping process:
         1. Generates an affinity mapping session from self.documents
-        2. Chunks all documents into smaller pieces
+        2. Chunks all documents into smaller pieces (with iterative re-chunking if needed)
         3. Assigns each chunk to the most similar cluster (or 'Uncategorized' if below threshold)
+
+        If there are too few chunks compared to clusters, the method will iteratively reduce
+        chunk_size to generate more chunks, ensuring better coverage of all clusters.
 
         Args:
             chunk_size: Maximum size of each chunk in characters (default: 1000)
@@ -432,12 +435,51 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
         # Step 1: Generate affinity mapping session
         session = self.generate_affinity_mapping_session()
 
-        # Step 2: Chunk all documents
+        # Count regular clusters (exclude uncategorized cluster 999 if it exists)
+        num_clusters = len([c for c in session.clusters if c['cluster_number'] != 999])
+
+        # Step 2: Chunk all documents with iterative re-chunking if needed
+        current_chunk_size = chunk_size
+        current_overlap = chunk_overlap
+        min_chunk_size = 100  # Minimum chunk size to avoid too small chunks
+
         chunks = self.chunk_documents(
             documents=self.documents,
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
+            chunk_size=current_chunk_size,
+            chunk_overlap=current_overlap
         )
+
+        # Iteratively reduce chunk size if we have too few chunks
+        # Target: at least 2x chunks compared to clusters for better coverage
+        # This ensures enough chunks to distribute across all clusters
+        target_chunk_count = num_clusters * 2
+
+        iteration = 1
+        max_iterations = 10
+
+        while len(chunks) < target_chunk_count and current_chunk_size > min_chunk_size and iteration <= max_iterations:
+            # Reduce chunk size by 30% and overlap proportionally
+            current_chunk_size = int(current_chunk_size * 0.7)
+            current_overlap = int(current_overlap * 0.7)
+
+            # Ensure minimum chunk size
+            if current_chunk_size < min_chunk_size:
+                current_chunk_size = min_chunk_size
+                current_overlap = int(min_chunk_size * 0.2)  # 20% overlap for minimum size
+
+            print(f"  → Iteration {iteration}: Re-chunking with chunk_size={current_chunk_size}, overlap={current_overlap}")
+
+            chunks = self.chunk_documents(
+                documents=self.documents,
+                chunk_size=current_chunk_size,
+                chunk_overlap=current_overlap
+            )
+
+            print(f"  → Generated {len(chunks)} chunks (target: {target_chunk_count})")
+            iteration += 1
+
+        if iteration > max_iterations:
+            print(f"  → Reached maximum iterations ({max_iterations}), stopping with {len(chunks)} chunks")
 
         # Step 3: Assign chunks to clusters
         results = self.add_chunks_to_clusters(
