@@ -8,8 +8,8 @@ using affinity mapping techniques.
 import re
 from datetime import datetime
 from pathlib import Path
-from llm_client import create_deepinfra_client
-from embedding_client import create_openai_embedding_client, EmbeddingClient
+from affinity_mapping_service.llm_client import create_deepinfra_client
+from affinity_mapping_service.embedding_client import create_openai_embedding_client, EmbeddingClient
 
 __version__ = "0.1.0"
 

@@ -4,7 +4,7 @@ This file is maintained for backward compatibility.
 Modern installations should use pyproject.toml.
 """
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 # Read the README file
 with open("README.md", "r", encoding="utf-8") as fh:
@@ -19,7 +19,7 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/yourusername/affinity-mapping-service",
-    py_modules=["affinity_mapping_service"],
+    packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",

@@ -47,7 +47,7 @@ Issues = "https://github.com/yourusername/affinity-mapping-service/issues"
 affinity-mapping-service = "affinity_mapping_service:main"
 
 [tool.setuptools]
-py-modules = ["affinity_mapping_service"]
+packages = ["affinity_mapping_service"]
 
 [tool.black]
 line-length = 88
