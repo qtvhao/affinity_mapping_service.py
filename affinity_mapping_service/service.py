@@ -55,6 +55,16 @@ class AffinityMappingSession:
             self._clusters = self._parse_clusters()
         return self._clusters
 
+    @clusters.setter
+    def clusters(self, value: list[dict]) -> None:
+        """
+        Set the clusters list.
+
+        Args:
+            value: List of cluster dictionaries
+        """
+        self._clusters = value
+
     def _parse_clusters(self) -> list[dict]:
         """Parse clusters from the generated content and generate embeddings."""
         clusters = []
