@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 from affinity_mapping_service.llm_client import create_tenant_llm_client
-from affinity_mapping_service.embedding_client import create_openai_embedding_client, EmbeddingClient
+from affinity_mapping_service.embedding_client import create_tenant_llm_embedding_client, EmbeddingClient
 
 __version__ = "0.1.0"
 
@@ -144,9 +144,9 @@ class AffinityMappingService:
             tenant_id=tenant_id,
             model_reference=model_reference
         )
-        self.embedding_client = create_openai_embedding_client(
-            api_key=openai_api_key,
-            model=embedding_model
+        self.embedding_client = create_tenant_llm_embedding_client(
+            tenant_id=tenant_id,
+            model_reference=embedding_model if "@" in embedding_model else f"{embedding_model}@OpenAI"
         )
 
     async def generate_affinity_mapping_session(self) -> AffinityMappingSession:

@@ -15,7 +15,7 @@ from affinity_mapping_service.llm_client import (
 from affinity_mapping_service.embedding_client import (
     EmbeddingClient,
     EmbeddingStore,
-    create_openai_embedding_client,
+    create_tenant_llm_embedding_client,
 )
 
 __all__ = [
@@ -28,7 +28,7 @@ __all__ = [
     # Embedding client
     "EmbeddingClient",
     "EmbeddingStore",
-    "create_openai_embedding_client",
+    "create_tenant_llm_embedding_client",
     # Package metadata
     "__version__",
     "main",

@@ -1,78 +1,117 @@
 """
-Embedding Client for OpenAI API
+Embedding Client using Tenant LLM Service
 
-A dedicated client for generating text embeddings using OpenAI's embedding models.
+A dedicated client for generating text embeddings via the tenant-llm service proxy.
 """
 
 import os
-from openai import OpenAI
+import httpx
+from typing import Optional
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
+# Tenant LLM Service Configuration
+TENANT_LLM_API_BASE_URL = os.getenv("TENANT_LLM_API_BASE_URL", "http://tenant-llm:8009")
+CROSS_SERVICE_API_KEY = os.getenv("CROSS_SERVICE_API_KEY", "dev-cross-service-key-change-in-production")
+
 
 class EmbeddingClient:
-    """Client for generating text embeddings via OpenAI API."""
+    """Client for generating text embeddings via Tenant LLM Service."""
 
     def __init__(
         self,
-        api_key: str | None = None,
-        model: str = "text-embedding-3-large"
+        tenant_id: str = "default",
+        model_reference: str = "text-embedding-3-large@OpenAI",
+        base_url: Optional[str] = None
     ):
         """
         Initialize the Embedding Client.
 
         Args:
-            api_key: OpenAI API key (optional, loaded from OPENAI_API_KEY env var)
-            model: Embedding model identifier (default: text-embedding-3-large)
+            tenant_id: Tenant identifier (default: "default")
+            model_reference: Model reference in format "model@factory" (default: text-embedding-3-large@OpenAI)
+            base_url: Base URL for tenant-llm service (optional, uses TENANT_LLM_API_BASE_URL env var)
         """
-        if api_key is None:
-            api_key = os.environ.get('OPENAI_API_KEY')
+        self.tenant_id = tenant_id
+        self.model_reference = model_reference
+        self.base_url = base_url or TENANT_LLM_API_BASE_URL
+        self.embeddings_url = f"{self.base_url}/api/v1/openai/embeddings"
 
-        if not api_key:
-            raise ValueError(
-                "API key is required. Provide it via the api_key parameter "
-                "or set OPENAI_API_KEY environment variable."
-            )
-
-        self.api_key = api_key
-        self.model = model
-        self.client = OpenAI(api_key=api_key)
-
-    def embed(self, text: str) -> list[float]:
+    def embed(self, text: str, timeout: int = 30) -> list[float]:
         """
         Generate embedding for a single text.
 
         Args:
             text: Text to embed
+            timeout: Request timeout in seconds
 
         Returns:
             list[float]: Embedding vector
         """
-        response = self.client.embeddings.create(
-            model=self.model,
-            input=text
-        )
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                response = client.post(
+                    self.embeddings_url,
+                    headers={
+                        "X-API-Key": CROSS_SERVICE_API_KEY,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "tenant_id": self.tenant_id,
+                        "model_reference": self.model_reference,
+                        "input": text
+                    }
+                )
 
-        return response.data[0].embedding
+                if response.status_code == 200:
+                    result = response.json()
+                    return result["data"][0]["embedding"]
+                else:
+                    raise RuntimeError(f"Tenant LLM embedding error: {response.status_code} - {response.text}")
 
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        except httpx.TimeoutException:
+            raise RuntimeError(f"Tenant LLM embedding request timed out after {timeout} seconds")
+        except Exception as e:
+            raise RuntimeError(f"Error calling Tenant LLM embeddings endpoint: {str(e)}")
+
+    def embed_batch(self, texts: list[str], timeout: int = 60) -> list[list[float]]:
         """
         Generate embeddings for multiple texts in a batch.
 
         Args:
             texts: List of texts to embed
+            timeout: Request timeout in seconds
 
         Returns:
             list[list[float]]: List of embedding vectors
         """
-        response = self.client.embeddings.create(
-            model=self.model,
-            input=texts
-        )
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                response = client.post(
+                    self.embeddings_url,
+                    headers={
+                        "X-API-Key": CROSS_SERVICE_API_KEY,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "tenant_id": self.tenant_id,
+                        "model_reference": self.model_reference,
+                        "input": texts
+                    }
+                )
 
-        return [item.embedding for item in response.data]
+                if response.status_code == 200:
+                    result = response.json()
+                    return [item["embedding"] for item in result["data"]]
+                else:
+                    raise RuntimeError(f"Tenant LLM embedding error: {response.status_code} - {response.text}")
+
+        except httpx.TimeoutException:
+            raise RuntimeError(f"Tenant LLM embedding request timed out after {timeout} seconds")
+        except Exception as e:
+            raise RuntimeError(f"Error calling Tenant LLM embeddings endpoint: {str(e)}")
 
     def get_embedding_dimension(self) -> int:
         """
@@ -86,21 +125,23 @@ class EmbeddingClient:
         return len(test_embedding)
 
 
-def create_openai_embedding_client(
-    api_key: str | None = None,
-    model: str = "text-embedding-3-large"
+def create_tenant_llm_embedding_client(
+    tenant_id: str = "default",
+    model_reference: str = "text-embedding-3-large@OpenAI",
+    base_url: Optional[str] = None
 ) -> EmbeddingClient:
     """
-    Factory function to create an OpenAI embedding client.
+    Factory function to create a Tenant LLM embedding client.
 
     Args:
-        api_key: OpenAI API key (optional, loaded from env)
-        model: Embedding model identifier (default: text-embedding-3-large)
+        tenant_id: Tenant identifier (default: "default")
+        model_reference: Model reference in format "model@factory" (default: text-embedding-3-large@OpenAI)
+        base_url: Base URL for tenant-llm service (optional)
 
     Returns:
         EmbeddingClient: Configured embedding client instance
     """
-    return EmbeddingClient(api_key=api_key, model=model)
+    return EmbeddingClient(tenant_id=tenant_id, model_reference=model_reference, base_url=base_url)
 
 
 class EmbeddingStore:
