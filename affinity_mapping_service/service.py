@@ -26,7 +26,11 @@ class AffinityMappingSession:
             embedding_client: Optional embedding client for generating cluster embeddings
             log_dir: Directory to store log files (default: "logs")
         """
-        self.content = content
+        # Strip <think> tags from DeepSeek-R1 reasoning process
+        # Pattern: Remove everything from <think> to </think> (including tags)
+        cleaned_content = re.sub(r'<think>.*?</think>\s*', '', content, flags=re.DOTALL)
+
+        self.content = cleaned_content
         self.embedding_client = embedding_client
         self.log_dir = Path(log_dir)
         self.log_file = None
