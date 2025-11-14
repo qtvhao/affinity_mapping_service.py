@@ -8,7 +8,7 @@ using affinity mapping techniques.
 import re
 from datetime import datetime
 from pathlib import Path
-from affinity_mapping_service.llm_client import create_deepinfra_client
+from affinity_mapping_service.llm_client import create_tenant_llm_client
 from affinity_mapping_service.embedding_client import create_openai_embedding_client, EmbeddingClient
 
 __version__ = "0.1.0"
@@ -124,7 +124,8 @@ class AffinityMappingService:
     def __init__(
         self,
         init_documents: list[str],
-        api_key: str | None = None,
+        tenant_id: str = "default",
+        model_reference: str = "deepseek-ai/DeepSeek-R1-Turbo@OpenAI",
         openai_api_key: str | None = None,
         embedding_model: str = "text-embedding-3-large"
     ):
@@ -133,20 +134,24 @@ class AffinityMappingService:
 
         Args:
             init_documents: List of initial documents to process
-            api_key: DeepInfra API key (optional, loaded from .env via DEEPINFRA_API_KEY)
+            tenant_id: Tenant identifier for multi-tenant LLM config (default: "default")
+            model_reference: Model reference in format "model_name@factory" (default: "deepseek-ai/DeepSeek-R1-Turbo@OpenAI")
             openai_api_key: OpenAI API key for embeddings (optional, loaded from .env via OPENAI_API_KEY)
             embedding_model: Embedding model to use (default: text-embedding-3-large)
         """
         self.documents = init_documents
-        self.llm_client = create_deepinfra_client(api_key=api_key)
+        self.llm_client = create_tenant_llm_client(
+            tenant_id=tenant_id,
+            model_reference=model_reference
+        )
         self.embedding_client = create_openai_embedding_client(
             api_key=openai_api_key,
             model=embedding_model
         )
 
-    def generate_affinity_mapping_session(self) -> AffinityMappingSession:
+    async def generate_affinity_mapping_session(self) -> AffinityMappingSession:
         """
-        Generate an Affinity Mapping Session using DeepInfra GLM-4.6 model with init_documents as context.
+        Generate an Affinity Mapping Session using Tenant LLM service with init_documents as context.
 
         Returns:
             AffinityMappingSession: The generated affinity mapping document
@@ -157,7 +162,7 @@ class AffinityMappingService:
             for i, doc in enumerate(self.documents)
         ])
 
-        # Create the prompt for DeepInfra
+        # Create the prompt for Tenant LLM
         prompt = f"""Based on the following documents, create an affinity mapping session that groups related concepts.
 
 {context}
@@ -199,9 +204,9 @@ Requirements:
 
 Provide ONLY the affinity mapping with grouped concept clusters. Start directly with the clusters."""
 
-        # Call DeepInfra API via LLM client
+        # Call Tenant LLM API via LLM client
         system_prompt = "You are an expert in Domain-Driven Design and affinity mapping techniques."
-        content = self.llm_client.generate_with_system_prompt(
+        content = await self.llm_client.generate_with_system_prompt(
             system_prompt=system_prompt,
             user_prompt=prompt,
             temperature=0.7
@@ -414,7 +419,7 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
 
         return results
 
-    def process_documents_with_affinity_mapping(
+    async def process_documents_with_affinity_mapping(
         self,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
@@ -443,7 +448,7 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
                 - list[dict]: Cluster assignment results for each chunk
         """
         # Step 1: Generate affinity mapping session
-        session = self.generate_affinity_mapping_session()
+        session = await self.generate_affinity_mapping_session()
 
         # Count regular clusters (exclude uncategorized cluster 999 if it exists)
         num_clusters = len([c for c in session.clusters if c['cluster_number'] != 999])

@@ -10,7 +10,7 @@ from affinity_mapping_service.service import (
 )
 from affinity_mapping_service.llm_client import (
     LLMClient,
-    create_deepinfra_client,
+    create_tenant_llm_client,
 )
 from affinity_mapping_service.embedding_client import (
     EmbeddingClient,
@@ -24,7 +24,7 @@ __all__ = [
     "AffinityMappingSession",
     # LLM client
     "LLMClient",
-    "create_deepinfra_client",
+    "create_tenant_llm_client",
     # Embedding client
     "EmbeddingClient",
     "EmbeddingStore",

@@ -1,82 +1,109 @@
 """
-LLM Client for DeepInfra API
+LLM Client for Tenant LLM Service
 
-A dedicated client for interacting with LLM services via DeepInfra.
+A dedicated client for interacting with LLM services via the tenant-llm service.
+This ensures consistent API key management and multi-tenant LLM configuration.
 """
 
 import os
-from openai import OpenAI
+import httpx
+import logging
+from typing import Optional
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
+# Configuration
+TENANT_LLM_API_BASE_URL = os.getenv("TENANT_LLM_API_BASE_URL", "http://tenant-llm:8009")
+CROSS_SERVICE_API_KEY = os.getenv("CROSS_SERVICE_API_KEY", "dev-cross-service-key-change-in-production")
+
 
 class LLMClient:
-    """Client for interacting with LLM services via DeepInfra API."""
+    """Client for interacting with LLM services via Tenant LLM Service."""
 
     def __init__(
         self,
-        api_key: str | None = None,
-        base_url: str = "https://api.deepinfra.com/v1/openai",
-        model: str = "zai-org/GLM-4.6"
+        tenant_id: str = "default",
+        model_reference: str = "deepseek-ai/DeepSeek-R1-Turbo@OpenAI",
+        base_url: str | None = None
     ):
         """
         Initialize the LLM Client.
 
         Args:
-            api_key: DeepInfra API key (optional, loaded from DEEPINFRA_API_KEY env var)
-            base_url: API base URL (default: DeepInfra OpenAI-compatible endpoint)
-            model: Model identifier (default: zai-org/GLM-4.6)
+            tenant_id: Tenant identifier for multi-tenant LLM config
+            model_reference: Model reference in format "model_name@factory" (e.g., "gpt-4o@OpenAI")
+            base_url: Optional base URL override (default: TENANT_LLM_API_BASE_URL env var)
         """
-        if api_key is None:
-            api_key = os.environ.get('DEEPINFRA_API_KEY')
+        self.tenant_id = tenant_id
+        self.model_reference = model_reference
+        self.base_url = base_url or TENANT_LLM_API_BASE_URL
+        self.proxy_url = f"{self.base_url}/api/v1/openai/chat/completions"
 
-        if not api_key:
-            raise ValueError(
-                "API key is required. Provide it via the api_key parameter "
-                "or set DEEPINFRA_API_KEY environment variable."
-            )
-
-        self.api_key = api_key
-        self.base_url = base_url
-        self.model = model
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
-
-    def chat_completion(
+    async def chat_completion(
         self,
         messages: list[dict],
         temperature: float = 0.7,
-        model: str | None = None
-    ) -> str:
+        max_tokens: Optional[int] = None,
+        timeout: int = 180
+    ) -> Optional[str]:
         """
-        Generate a chat completion.
+        Generate a chat completion using tenant-llm service.
 
         Args:
             messages: List of message dictionaries with 'role' and 'content'
             temperature: Sampling temperature (default: 0.7)
-            model: Model to use (default: uses instance model)
+            max_tokens: Maximum tokens to generate (optional)
+            timeout: Request timeout in seconds (default: 180)
 
         Returns:
-            str: The generated completion content
+            str: The generated completion content, or None if failed
         """
-        if model is None:
-            model = self.model
+        try:
+            logger.info(f"Calling tenant-llm proxy: {self.proxy_url} with model {self.model_reference}")
 
-        response = self.client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature
-        )
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(
+                    self.proxy_url,
+                    headers={
+                        "X-API-Key": CROSS_SERVICE_API_KEY,
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "tenant_id": self.tenant_id,
+                        "model_reference": self.model_reference,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens
+                    }
+                )
 
-        return response.choices[0].message.content
+                if response.status_code == 200:
+                    result = response.json()
+                    content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    logger.info(f"Generated content using Tenant LLM proxy: {self.model_reference}")
+                    return content
+                else:
+                    logger.error(f"Tenant LLM proxy error: {response.status_code} - {response.text}")
+                    return None
 
-    def generate_with_system_prompt(
+        except httpx.TimeoutException:
+            logger.error(f"Tenant LLM proxy request timed out after {timeout} seconds")
+            return None
+        except Exception as e:
+            logger.error(f"Error calling Tenant LLM proxy: {str(e)}")
+            return None
+
+    async def generate_with_system_prompt(
         self,
         system_prompt: str,
         user_prompt: str,
-        temperature: float = 0.7
-    ) -> str:
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None
+    ) -> Optional[str]:
         """
         Generate completion with system and user prompts.
 
@@ -84,34 +111,38 @@ class LLMClient:
             system_prompt: System role prompt
             user_prompt: User prompt
             temperature: Sampling temperature (default: 0.7)
+            max_tokens: Maximum tokens to generate (optional)
 
         Returns:
-            str: The generated completion content
+            str: The generated completion content, or None if failed
         """
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
 
-        return self.chat_completion(messages=messages, temperature=temperature)
+        return await self.chat_completion(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens
+        )
 
 
-def create_deepinfra_client(
-    api_key: str | None = None,
-    model: str = "zai-org/GLM-4.6"
+def create_tenant_llm_client(
+    tenant_id: str = "default",
+    model_reference: str = "deepseek-ai/DeepSeek-R1-Turbo@OpenAI"
 ) -> LLMClient:
     """
-    Factory function to create a DeepInfra LLM client.
+    Factory function to create a Tenant LLM client.
 
     Args:
-        api_key: DeepInfra API key (optional, loaded from env)
-        model: Model identifier (default: zai-org/GLM-4.6)
+        tenant_id: Tenant identifier (default: "default")
+        model_reference: Model reference in format "model_name@factory"
 
     Returns:
         LLMClient: Configured LLM client instance
     """
     return LLMClient(
-        api_key=api_key,
-        base_url="https://api.deepinfra.com/v1/openai",
-        model=model
+        tenant_id=tenant_id,
+        model_reference=model_reference
     )
