@@ -66,15 +66,14 @@ class LLMClient:
             logger.info(f"Calling tenant-llm proxy: {self.proxy_url} with model {self.model_reference}")
 
             async with httpx.AsyncClient(timeout=timeout) as client:
-                # Build payload, only include max_tokens if it's not None
+                # Build payload with max_tokens (use default of 4096 if None, as tenant-llm requires this field)
                 payload = {
                     "tenant_id": self.tenant_id,
                     "model_reference": self.model_reference,
                     "messages": messages,
-                    "temperature": temperature
+                    "temperature": temperature,
+                    "max_tokens": max_tokens if max_tokens is not None else 4096
                 }
-                if max_tokens is not None:
-                    payload["max_tokens"] = max_tokens
 
                 response = await client.post(
                     self.proxy_url,
