@@ -74,7 +74,8 @@ class AffinityMappingSession:
         clusters = []
 
         # Pattern to match cluster sections
-        cluster_pattern = r'###\s+Cluster\s+(\d+):\s+(.+?)\n\*\*Related Concepts:\*\*\n(.*?)\n\*\*Key Relationships:\*\*\n(.*?)(?=\n###|\Z)'
+        # Updated to handle trailing spaces (markdown line breaks) after cluster names and section headers
+        cluster_pattern = r'###\s+Cluster\s+(\d+):\s+(.+?)\s*\n\*\*Related Concepts:\*\*\s*\n(.*?)\n\*\*Key Relationships:\*\*\s*\n(.*?)(?=\n###|\Z)'
 
         matches = re.findall(cluster_pattern, self.content, re.DOTALL)
 
