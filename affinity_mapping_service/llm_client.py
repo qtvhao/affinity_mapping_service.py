@@ -66,19 +66,23 @@ class LLMClient:
             logger.info(f"Calling tenant-llm proxy: {self.proxy_url} with model {self.model_reference}")
 
             async with httpx.AsyncClient(timeout=timeout) as client:
+                # Build payload, only include max_tokens if it's not None
+                payload = {
+                    "tenant_id": self.tenant_id,
+                    "model_reference": self.model_reference,
+                    "messages": messages,
+                    "temperature": temperature
+                }
+                if max_tokens is not None:
+                    payload["max_tokens"] = max_tokens
+
                 response = await client.post(
                     self.proxy_url,
                     headers={
                         "X-API-Key": CROSS_SERVICE_API_KEY,
                         "Content-Type": "application/json"
                     },
-                    json={
-                        "tenant_id": self.tenant_id,
-                        "model_reference": self.model_reference,
-                        "messages": messages,
-                        "temperature": temperature,
-                        "max_tokens": max_tokens
-                    }
+                    json=payload
                 )
 
                 if response.status_code == 200:
