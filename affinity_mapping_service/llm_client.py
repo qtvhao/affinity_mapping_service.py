@@ -79,7 +79,8 @@ class LLMClient:
                     self.proxy_url,
                     headers={
                         "X-API-Key": CROSS_SERVICE_API_KEY,
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
+                        "X-Service-Name": "preparation-strategy"
                     },
                     json=payload
                 )

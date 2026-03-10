@@ -56,7 +56,8 @@ class EmbeddingClient:
                     self.embeddings_url,
                     headers={
                         "X-API-Key": CROSS_SERVICE_API_KEY,
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
+                        "X-Service-Name": "preparation-strategy"
                     },
                     json={
                         "tenant_id": self.tenant_id,
@@ -93,7 +94,8 @@ class EmbeddingClient:
                     self.embeddings_url,
                     headers={
                         "X-API-Key": CROSS_SERVICE_API_KEY,
-                        "Content-Type": "application/json"
+                        "Content-Type": "application/json",
+                        "X-Service-Name": "preparation-strategy"
                     },
                     json={
                         "tenant_id": self.tenant_id,
