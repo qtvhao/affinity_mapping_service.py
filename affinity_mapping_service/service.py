@@ -263,9 +263,78 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
 
         return AffinityMappingSession(content=content, embedding_client=self.embedding_client)
 
+    def _extract_structural_blocks(self, document: str) -> tuple[list[str], str]:
+        """
+        Extract structural markdown blocks (code/mermaid blocks, tables) as atomic chunks.
+
+        Uses python-markdown's battle-tested FencedBlockPreprocessor regex for code blocks
+        and TableProcessor for table detection, instead of hand-rolled regexes.
+
+        These blocks should never be split by SentenceSplitter because they contain
+        syntax (Mermaid diagrams, code, table rows) that becomes meaningless when cut.
+
+        Args:
+            document: The markdown document
+
+        Returns:
+            tuple of (extracted_blocks, remaining_text) where extracted_blocks are
+            kept whole and remaining_text has placeholders removed for prose splitting.
+        """
+        from markdown.extensions.fenced_code import FencedBlockPreprocessor
+        from markdown.extensions.tables import TableProcessor
+        from markdown import Markdown
+
+        extracted = []
+        regions_to_remove = []
+
+        # 1. Extract fenced code blocks using python-markdown's regex
+        #    Handles edge cases: nested backticks, ~~~, attributes, etc.
+        fenced_re = FencedBlockPreprocessor.FENCED_BLOCK_RE
+        for m in fenced_re.finditer(document):
+            block = m.group().strip()
+            if len(block) > 20:
+                extracted.append(block)
+                regions_to_remove.append((m.start(), m.end()))
+
+        # 2. Extract markdown tables using python-markdown's TableProcessor
+        #    Split document into blank-line-separated blocks and test each
+        md = Markdown(extensions=['tables'])
+        table_proc = None
+        for bp in md.parser.blockprocessors:
+            if isinstance(bp, TableProcessor):
+                table_proc = bp
+                break
+
+        if table_proc is not None:
+            # Find blank-line-separated blocks and check if they're tables
+            block_pattern = re.compile(r'(?:^|\n\n)((?:[^\n]+\n?)+)', re.MULTILINE)
+            for m in block_pattern.finditer(document):
+                block_text = m.group(1).strip()
+                # Skip blocks inside already-extracted fenced code regions
+                if any(m.start(1) >= start and m.end(1) <= end for start, end in regions_to_remove):
+                    continue
+                # Use python-markdown's table test (checks header + separator row)
+                if table_proc.test(None, block_text):
+                    extracted.append(block_text)
+                    regions_to_remove.append((m.start(1), m.end(1)))
+
+        # Build remaining text by removing extracted regions
+        if not regions_to_remove:
+            return extracted, document
+
+        regions_to_remove.sort(key=lambda r: r[0], reverse=True)
+        remaining = document
+        for start, end in regions_to_remove:
+            remaining = remaining[:start] + "\n" + remaining[end:]
+
+        return extracted, remaining
+
     def chunk_document(self, document: str, chunk_size: int = 512, chunk_overlap: int = 128) -> list[str]:
         """
-        Chunk a markdown document using LlamaIndex SentenceSplitter for more granular chunks.
+        Chunk a markdown document with structural block preservation.
+
+        Extracts fenced code blocks (including Mermaid diagrams) and markdown tables
+        as atomic chunks, then uses LlamaIndex SentenceSplitter for the remaining prose.
 
         Args:
             document: The markdown document to chunk
@@ -278,23 +347,23 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
         from llama_index.core.node_parser import SentenceSplitter
         from llama_index.core.schema import Document
 
-        # Create a LlamaIndex Document object
-        llama_doc = Document(text=document)
+        # Step 1: Extract structural blocks as atomic chunks
+        structural_blocks, remaining_text = self._extract_structural_blocks(document)
 
-        # Initialize SentenceSplitter with chunk size configuration
-        # This will create more granular chunks based on sentences and size limits
-        parser = SentenceSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap
-        )
+        # Step 2: Split remaining prose with SentenceSplitter
+        prose_chunks = []
+        remaining_text = remaining_text.strip()
+        if remaining_text:
+            llama_doc = Document(text=remaining_text)
+            parser = SentenceSplitter(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap
+            )
+            nodes = parser.get_nodes_from_documents([llama_doc])
+            prose_chunks = [node.get_content() for node in nodes]
 
-        # Parse the document into nodes
-        nodes = parser.get_nodes_from_documents([llama_doc])
-
-        # Extract text content from each node
-        chunks = [node.get_content() for node in nodes]
-
-        return chunks
+        # Combine: structural blocks first, then prose chunks
+        return structural_blocks + prose_chunks
 
     def chunk_documents(self, documents: list[str], chunk_size: int = 512, chunk_overlap: int = 128) -> list[str]:
         """
@@ -509,7 +578,7 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
         # Step 2: Chunk all documents with iterative re-chunking if needed
         current_chunk_size = chunk_size
         current_overlap = chunk_overlap
-        min_chunk_size = 100  # Minimum chunk size to avoid too small chunks
+        min_chunk_size = 400  # Minimum chunk size to preserve meaningful content
 
         chunks = self.chunk_documents(
             documents=self.documents,
