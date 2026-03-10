@@ -5,11 +5,15 @@ A service for transforming documents into Bounded Context Specifications
 using affinity mapping techniques.
 """
 
+import os
 import re
 from datetime import datetime
 from pathlib import Path
 from affinity_mapping_service.llm_client import create_tenant_llm_client
 from affinity_mapping_service.embedding_client import create_tenant_llm_embedding_client, EmbeddingClient
+from affinity_mapping_service.anthropic_llm_client import AnthropicLLMClient
+from affinity_mapping_service.agentic_loop import run_agentic_loop
+from affinity_mapping_service import affinity_mapping_prompt_builder as prompt_builder
 
 __version__ = "0.1.0"
 
@@ -215,6 +219,46 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
             system_prompt=system_prompt,
             user_prompt=prompt,
             temperature=0.7
+        )
+
+        return AffinityMappingSession(content=content, embedding_client=self.embedding_client)
+
+    async def generate_affinity_mapping_session_agentic(self) -> 'AffinityMappingSession':
+        """
+        Generate an Affinity Mapping Session using agentic tool-use loop.
+
+        Uses MiniMax-M2.5 with read_document/save_affinity_mapping tools to
+        avoid truncation issues with single-shot DeepSeek-R1 calls.
+
+        Returns:
+            AffinityMappingSession: The generated affinity mapping document
+        """
+        anthropic_client = AnthropicLLMClient(base_url=self.llm_client.base_url)
+
+        model_reference = os.getenv(
+            "AFFINITY_MODEL_REFERENCE",
+            "MiniMaxAI/MiniMax-M2.5@MiniMax",
+        )
+
+        system = prompt_builder.build_system_prompt()
+        tools = prompt_builder.build_tools(self.documents)
+        tool_results = prompt_builder.build_tool_results(self.documents)
+
+        max_turns = len(self.documents) + 5
+
+        content = await run_agentic_loop(
+            anthropic_client=anthropic_client,
+            system_prompt=system,
+            user_prompt=prompt_builder.USER_PROMPT,
+            tools=tools,
+            tool_results_lookup=tool_results,
+            save_tool_name="save_affinity_mapping",
+            tenant_id=self.llm_client.tenant_id,
+            model_reference=model_reference,
+            max_turns=max_turns,
+            temperature=0.6,
+            max_tokens=16384,
+            timeout=600.0,
         )
 
         return AffinityMappingSession(content=content, embedding_client=self.embedding_client)
@@ -428,7 +472,8 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
         self,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
-        similarity_threshold: float = 0.7
+        similarity_threshold: float = 0.7,
+        agentic: bool = False,
     ) -> tuple[AffinityMappingSession, list[str], list[dict]]:
         """
         Complete workflow: generate affinity mapping, chunk documents, and assign chunks to clusters.
@@ -453,7 +498,10 @@ Provide ONLY the affinity mapping with grouped concept clusters. Start directly 
                 - list[dict]: Cluster assignment results for each chunk
         """
         # Step 1: Generate affinity mapping session
-        session = await self.generate_affinity_mapping_session()
+        if agentic:
+            session = await self.generate_affinity_mapping_session_agentic()
+        else:
+            session = await self.generate_affinity_mapping_session()
 
         # Count regular clusters (exclude uncategorized cluster 999 if it exists)
         num_clusters = len([c for c in session.clusters if c['cluster_number'] != 999])

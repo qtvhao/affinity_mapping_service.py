@@ -17,14 +17,19 @@ from affinity_mapping_service.embedding_client import (
     EmbeddingStore,
     create_tenant_llm_embedding_client,
 )
+from affinity_mapping_service.anthropic_llm_client import AnthropicLLMClient
+from affinity_mapping_service.agentic_loop import run_agentic_loop
 
 __all__ = [
     # Service classes
     "AffinityMappingService",
     "AffinityMappingSession",
-    # LLM client
+    # LLM clients
     "LLMClient",
     "create_tenant_llm_client",
+    "AnthropicLLMClient",
+    # Agentic loop
+    "run_agentic_loop",
     # Embedding client
     "EmbeddingClient",
     "EmbeddingStore",
